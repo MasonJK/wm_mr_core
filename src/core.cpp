@@ -21,9 +21,15 @@ MultiRobotCore::~MultiRobotCore()
 {
 }
 
-void fleet_robot_pose_callback(const FleetRobotPose::SharedPtr msg) const
+void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPose::SharedPtr msg) const
 {
+  std::vector<RobotPose> fleet_robot_poses;
+  for (const auto& pose : msg->fleet_pose)
+  {
+    fleet_robot_poses.push_back(pose);
+  }
 
+  fleet_pose[msg->fleet_name] = fleet_robot_poses;
 }
 
 
