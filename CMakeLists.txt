@@ -23,9 +23,6 @@ include_directories(include)
 add_executable(core src/core.cpp)
 ament_target_dependencies(core rclcpp mr_msgs)
 
-# add_executable(helloworld_subscriber src/helloworld_subscriber.cpp)
-# ament_target_dependencies(helloworld_subscriber rclcpp std_msgs)
-
 # # Install
 install(TARGETS
   core

@@ -11,17 +11,22 @@ MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
 
   const auto QOS_RKL10V = rclcpp::QoS(rclcpp::KeepLast(qos_depth)).reliable().durability_volatile();
 
+  // topic pub, sub
   fleet_robot_pose_sub_ = this->create_subscription<FleetRobotPose>(
     "fleet_robot_pose",
     QOS_RKL10V,
     std::bind(&MultiRobotCore::fleet_robot_pose_callback, this, _1));
+
+  // service server
+  single_goal_mission_server_ = this->create_service<SingleGoalMission>("single_goal_mission",
+    std::bind(&MultiRobotCore::assign_single_goal_mission, this, _1, _2));
 }
 
 MultiRobotCore::~MultiRobotCore()
 {
 }
 
-void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPose::SharedPtr msg) const
+void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPose::SharedPtr msg)
 {
   std::vector<RobotPose> fleet_robot_poses;
   for (const auto& pose : msg->fleet_pose)
@@ -30,6 +35,11 @@ void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPos
   }
 
   fleet_pose[msg->fleet_name] = fleet_robot_poses;
+}
+
+void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoalMission::Request> request,
+  std::shared_ptr<SingleGoalMission::Response> response){
+
 }
 
 
