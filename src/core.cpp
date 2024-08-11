@@ -172,9 +172,8 @@ void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoal
   std::shared_ptr<SingleGoalMission::Response> response){
   // check if the robot is selected
   // if not, bid between currently connected robots
-  // if robot has been chosen, send to gpp
-  // retrieve the navigation poses, and send to api to send to robot.
-  // add to mission
+  // if robot has been chosen, send to gpp(it will send it to the api)
+  // retrieve the navigation poses, and add to mission
 
   // Check if the robot ID is provided
   if(request->robot_id.empty()){
