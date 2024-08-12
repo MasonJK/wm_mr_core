@@ -15,7 +15,7 @@
 #include "mr_msgs/msg/log.hpp"
 #include "mr_msgs/msg/fleet_robot_pose.hpp"
 #include "mr_msgs/msg/robot_pose.hpp"
-#include "mr_msgs/srv/plan_global_path.hpp"
+#include "mr_msgs/msg/mission_data.hpp"
 #include "mr_msgs/srv/single_goal_mission.hpp"
 
 
@@ -44,12 +44,10 @@ struct Robot
 
 struct Mission
 {
-  builtin_interfaces::msg::Time start_time;
+  mr_msgs::msg::MissionData mission_data;
   std::string mission_type;
-  std::string robot_id;
-  builtin_interfaces::msg::Duration estimated_time_left;
+
   std::vector<UTMPose> waypoints;
-  float progress;
 };
 
 class MultiRobotCore : public rclcpp::Node
@@ -58,8 +56,8 @@ public:
   using Log = mr_msgs::msg::Log;
   using FleetRobotPose = mr_msgs::msg::FleetRobotPose;
   using RobotPose = mr_msgs::msg::RobotPose;
+  using MissionData = mr_msgs::msg::MissionData;
   using SingleGoalMission = mr_msgs::srv::SingleGoalMission;
-  using PlanGlobalPath = mr_msgs::srv::PlanGlobalPath;
 
   explicit MultiRobotCore(const rclcpp::NodeOptions & node_options = rclcpp::NodeOptions());
   virtual ~MultiRobotCore();
@@ -74,14 +72,13 @@ private:
 
   std::map<std::string, std::map<std::string, Robot> > robot_fleets_;
   std::map<std::string, Mission> missions_;
-  float disconnection_threshold_;
+  int disconnection_threshold_;
 
   rclcpp::Publisher<Log>::SharedPtr log_pub_;
   rclcpp::Subscription<FleetRobotPose>::SharedPtr fleet_robot_pose_sub_;
 
   rclcpp::Service<SingleGoalMission>::SharedPtr single_goal_mission_server_;
-  rclcpp::Client<PlanGlobalPath>::SharedPtr gpp_client_;
+  rclcpp::Client<SingleGoalMission>::SharedPtr single_goal_mission_adapter_client_;
   rclcpp::TimerBase::SharedPtr timer_;
-  // rclcpp::AsyncParametersClient::SharedPtr parameters_client_;
 };
 #endif  // CORE_HPP_

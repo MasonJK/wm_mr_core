@@ -48,6 +48,20 @@ float calculate_progress(const std::vector<UTMPose>& waypoints, float current_x,
   return (total_distance > 0) ? distance_covered / total_distance : 0.0;
 }
 
+std::vector<UTMPose> convertPosesToWaypoints(const std::vector<geometry_msgs::msg::PoseStamped>& poses) {
+  std::vector<UTMPose> waypoints;
+  waypoints.reserve(poses.size());
+
+  for (const auto &pose : poses) {
+    UTMPose waypoint;
+    waypoint.x = pose.pose.position.x;
+    waypoint.y = pose.pose.position.y;
+    waypoints.push_back(waypoint);
+  }
+
+  return waypoints;
+}
+
 MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
 : Node("multi_robot_core_node", node_options)
 {
@@ -68,7 +82,7 @@ MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
   // service server, client
   single_goal_mission_server_ = this->create_service<SingleGoalMission>("single_goal_mission",
     std::bind(&MultiRobotCore::assign_single_goal_mission, this, _1, _2));
-  gpp_client_ = this->create_client<PlanGlobalPath>("global_path_plan");
+  single_goal_mission_adapter_client_ = this->create_client<SingleGoalMission>("single_goal_mission_adapter");
 
   timer_ = this->create_wall_timer(
     std::chrono::seconds(10), std::bind(&MultiRobotCore::check_disconnected_robots, this)
@@ -111,6 +125,7 @@ void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPos
   // update robot poses
   // check if the robot is on a mission
   // if on a mission, estimate time left, and calculate progress
+  // if on a mission, check if replanning is needed for relieve traffic
 
   const std::string& fleet_id = msg->fleet_id;
   if (robot_fleets_.find(fleet_id) == robot_fleets_.end()) {
@@ -137,7 +152,7 @@ void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPos
           {
             if (missions_.find(robot_fleets_[fleet_id][robot_id].mission_id) != missions_.end()) {
               Mission& mission = missions_[robot_fleets_[fleet_id][robot_id].mission_id];
-              mission.progress = calculate_progress(mission.waypoints, robot_pose.utm_x, robot_pose.utm_y);
+              mission.mission_data.progress = calculate_progress(mission.waypoints, robot_pose.utm_x, robot_pose.utm_y);
             }
           }
       }
@@ -169,67 +184,75 @@ void MultiRobotCore::check_disconnected_robots()
 }
 
 void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoalMission::Request> request,
-  std::shared_ptr<SingleGoalMission::Response> response){
-  // check if the robot is selected
-  // if not, bid between currently connected robots
-  // if robot has been chosen, send to gpp(it will send it to the api)
-  // retrieve the navigation poses, and add to mission
-
+  std::shared_ptr<SingleGoalMission::Response> response)
+{
   // Check if the robot ID is provided
-  if(request->robot_id.empty()){
-    // TODO : bid on one of IDLE robots for the mission
+  if(request->mission_data.robot_id.empty()){
+    publish_log(mr_msgs::msg::Log::ERROR, "Robot ID not provided.");
     return;
   }
+
   // Find the robot by ID
-  const std::string& robot_id = request->robot_id;
-  auto fleet_it = robot_fleets_.find(request->fleet_id);
-  if (fleet_it == robot_fleets_.end()) {
+  const std::string& mission_id = request->mission_data.mission_id;
+  const std::string& fleet_id = request->mission_data.fleet_id;
+  const std::string& robot_id = request->mission_data.robot_id;
+
+  auto fleet_it = robot_fleets_.find(fleet_id);
+  if (fleet_it == robot_fleets_.end())
+  {
     publish_log(mr_msgs::msg::Log::ERROR, "Fleet ID not found.");
     return;
   }
-
   auto robot_it = fleet_it->second.find(robot_id);
-  if (robot_it == fleet_it->second.end()) {
+  if (robot_it == fleet_it->second.end())
+  {
     publish_log(mr_msgs::msg::Log::ERROR, "Robot ID not found in the fleet.");
     return;
   }
 
   Robot& robot = robot_it->second;
 
-  auto gpp_request = std::make_shared<PlanGlobalPath::Request>();
-  gpp_request->start_pose = robot.current_pose;
-  gpp_request->goal_pose = request->goal_pose;
+  auto single_goal_mission_request = std::make_shared<SingleGoalMission::Request>();
+  single_goal_mission_request->mission_data.start_time = this->now();
+  single_goal_mission_request->mission_data.mission_id = mission_id;
+  single_goal_mission_request->mission_data.fleet_id = fleet_id;
+  single_goal_mission_request->mission_data.robot_id = robot_id;
 
-  // Send the request to the global path planner service
-  if (!gpp_client_->wait_for_service(std::chrono::seconds(5))) {
-    publish_log(mr_msgs::msg::Log::ERROR, "Global Path Planner service not available.");
+  single_goal_mission_request->start_pose = robot.current_pose;
+  single_goal_mission_request->goal_pose = request->goal_pose;
+
+  // Send the request to the adapter for global planning and sending to the robot
+  if (!single_goal_mission_adapter_client_->wait_for_service(std::chrono::seconds(disconnection_threshold_))) {
+    publish_log(mr_msgs::msg::Log::ERROR, "adapter service not available.");
     return;
   }
 
-  auto result_future = gpp_client_->async_send_request(gpp_request);
+  auto single_goal_mission_result_future = single_goal_mission_adapter_client_->async_send_request(single_goal_mission_request);
 
   // Specify a timeout duration
-  std::chrono::seconds timeout(5);
-
-  if (result_future.wait_for(timeout) == std::future_status::ready) {
+  std::chrono::seconds timeout(disconnection_threshold_);
+  if (single_goal_mission_result_future.wait_for(timeout) == std::future_status::ready) {
     try {
-      auto result = result_future.get();
+      auto single_goal_mission_result = single_goal_mission_result_future.get();
 
-      // Log success and update mission details
-      publish_log(mr_msgs::msg::Log::INFO, "Path successfully retrieved from Global Path Planner.");
-
-      // Assuming you have a way to track missions, you might want to add this to your mission structure
+      // Register the mission
       Mission mission;
-      mission.start_time = this->now();
-      mission.robot_id = robot_id;
-      mission.mission_type = "single_goal";
-      // TODO : change it to UTMPose
-      mission.waypoints = result->poses;
-      mission.progress = 0.0;
-      missions_[robot.mission_id] = mission;
+      mission.mission_data = request->mission_data;
+      mission.mission_type = "SingleGoalMission";
+      mission.waypoints = convertPosesToWaypoints(single_goal_mission_result->poses);
 
-      // Update robot state
+      missions_[mission_id] = mission;
+
+      // Update the robot state
       robot.state = Robot::State::ON_MISSION;
+      robot.mission_id = mission_id;
+
+      // Respond to the service request
+      response->poses = single_goal_mission_result->poses;
+
+      std::string message = "Mission id("+mission_id+") has been successfully assigned to Robot("+robot_id+")";
+      publish_log(mr_msgs::msg::Log::INFO, message);
+
     } catch (const std::exception &e) {
       publish_log(mr_msgs::msg::Log::ERROR, "Failed to retrieve path from Global Path Planner: " + std::string(e.what()));
     }
