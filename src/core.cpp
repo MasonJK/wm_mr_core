@@ -80,6 +80,8 @@ MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
     std::bind(&MultiRobotCore::fleet_robot_pose_callback, this, _1));
 
   // service server, client
+  mission_state_change_server_ = this->create_service<MissionStateChange>("mission_state_change",
+    std::bind(&MultiRobotCore::mission_state_change, this, _1, _2));
   single_goal_mission_server_ = this->create_service<SingleGoalMission>("single_goal_mission",
     std::bind(&MultiRobotCore::assign_single_goal_mission, this, _1, _2));
   single_goal_mission_adapter_client_ = this->create_client<SingleGoalMission>("single_goal_mission_adapter");
@@ -157,6 +159,25 @@ void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPos
           }
       }
   }
+
+  // TODO : check if there is any robots that are going to collide
+}
+
+Robot& MultiRobotCore::find_robot_by_id(const std::string& fleet_id, const std::string& robot_id){
+  auto fleet_it = robot_fleets_.find(fleet_id);
+  if (fleet_it == robot_fleets_.end())
+  {
+    publish_log(mr_msgs::msg::Log::ERROR, "Fleet ID not found.");
+    throw std::runtime_error("Fleet ID not found.");
+  }
+  auto robot_it = fleet_it->second.find(robot_id);
+  if (robot_it == fleet_it->second.end())
+  {
+    publish_log(mr_msgs::msg::Log::ERROR, "Robot ID not found in the fleet.");
+    throw std::runtime_error("Robot ID not found in the fleet.");
+  }
+
+  return robot_it->second;
 }
 
 void MultiRobotCore::check_disconnected_robots()
@@ -197,20 +218,7 @@ void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoal
   const std::string& fleet_id = request->mission_data.fleet_id;
   const std::string& robot_id = request->mission_data.robot_id;
 
-  auto fleet_it = robot_fleets_.find(fleet_id);
-  if (fleet_it == robot_fleets_.end())
-  {
-    publish_log(mr_msgs::msg::Log::ERROR, "Fleet ID not found.");
-    return;
-  }
-  auto robot_it = fleet_it->second.find(robot_id);
-  if (robot_it == fleet_it->second.end())
-  {
-    publish_log(mr_msgs::msg::Log::ERROR, "Robot ID not found in the fleet.");
-    return;
-  }
-
-  Robot& robot = robot_it->second;
+  Robot& robot = find_robot_by_id(request->mission_data.fleet_id, request->mission_data.robot_id);
 
   auto single_goal_mission_request = std::make_shared<SingleGoalMission::Request>();
   single_goal_mission_request->mission_data.start_time = this->now();
@@ -261,8 +269,27 @@ void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoal
   }
 }
 
+void MultiRobotCore::mission_state_change(const std::shared_ptr<MissionStateChange::Request> request,
+  std::shared_ptr<MissionStateChange::Response> response){
+  // Find the mission
+  const std::string& mission_id = request->mission_id;
+  auto mission_it = missions_.find(mission_id);
 
+  if (mission_it == missions_.end()) {
+    publish_log(mr_msgs::msg::Log::ERROR, "Mission ID not found: " + mission_id);
+    return;
+  } else{
+    if(request->mission_state == request->FAIL){
+      publish_log(mr_msgs::msg::Log::ERROR, "Mission ID failed: " + mission_id);
+    } else if(request->mission_state == request->CANCEL){
+      publish_log(mr_msgs::msg::Log::WARN, "Mission ID canceled: " + mission_id);
+    } else if(request->mission_state == request->FINISH){
+      publish_log(mr_msgs::msg::Log::INFO, "Mission ID finished: " + mission_id);
+    }
 
+    missions_.erase(mission_it);
+  }
+}
 
 int main(int argc, char * argv[])
 {

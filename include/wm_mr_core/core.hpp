@@ -16,6 +16,7 @@
 #include "mr_msgs/msg/fleet_robot_pose.hpp"
 #include "mr_msgs/msg/robot_pose.hpp"
 #include "mr_msgs/msg/mission_data.hpp"
+#include "mr_msgs/srv/mission_state_change.hpp"
 #include "mr_msgs/srv/single_goal_mission.hpp"
 
 
@@ -57,6 +58,7 @@ public:
   using FleetRobotPose = mr_msgs::msg::FleetRobotPose;
   using RobotPose = mr_msgs::msg::RobotPose;
   using MissionData = mr_msgs::msg::MissionData;
+  using MissionStateChange = mr_msgs::srv::MissionStateChange;
   using SingleGoalMission = mr_msgs::srv::SingleGoalMission;
 
   explicit MultiRobotCore(const rclcpp::NodeOptions & node_options = rclcpp::NodeOptions());
@@ -66,8 +68,11 @@ private:
   void fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPose::SharedPtr msg);
   void assign_single_goal_mission(const std::shared_ptr<SingleGoalMission::Request> request,
     std::shared_ptr<SingleGoalMission::Response> response);
+  void mission_state_change(const std::shared_ptr<MissionStateChange::Request> request,
+    std::shared_ptr<MissionStateChange::Response> response);
 
   void check_disconnected_robots();
+  Robot& find_robot_by_id(const std::string& fleet_id, const std::string& robot_id);
   void publish_log(const int log_type, const std::string &log_content) const;
 
   std::map<std::string, std::map<std::string, Robot> > robot_fleets_;
@@ -77,6 +82,7 @@ private:
   rclcpp::Publisher<Log>::SharedPtr log_pub_;
   rclcpp::Subscription<FleetRobotPose>::SharedPtr fleet_robot_pose_sub_;
 
+  rclcpp::Service<MissionStateChange>::SharedPtr mission_state_change_server_;
   rclcpp::Service<SingleGoalMission>::SharedPtr single_goal_mission_server_;
   rclcpp::Client<SingleGoalMission>::SharedPtr single_goal_mission_adapter_client_;
   rclcpp::TimerBase::SharedPtr timer_;
