@@ -68,7 +68,7 @@ MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
   this->declare_parameter("qos_depth", 10);
   int8_t qos_depth = this->get_parameter("qos_depth").get_value<int8_t>();
   this->declare_parameter("disconnection_threshold", 10);
-  disconnection_threshold_ = this->get_parameter("disconnection_threshold").get_value<float>();
+  disconnection_threshold_ = this->get_parameter("disconnection_threshold").get_value<int8_t>();
 
   const auto QOS_RKL10V = rclcpp::QoS(rclcpp::KeepLast(qos_depth)).reliable().durability_volatile();
 
@@ -87,7 +87,7 @@ MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
   single_goal_mission_adapter_client_ = this->create_client<SingleGoalMission>("single_goal_mission_adapter");
 
   timer_ = this->create_wall_timer(
-    std::chrono::seconds(10), std::bind(&MultiRobotCore::check_disconnected_robots, this)
+    std::chrono::seconds(1), std::bind(&MultiRobotCore::check_disconnected_robots, this)
   );
 }
 
@@ -183,6 +183,7 @@ Robot& MultiRobotCore::find_robot_by_id(const std::string& fleet_id, const std::
 void MultiRobotCore::check_disconnected_robots()
 {
   rclcpp::Time current_time = this->now();
+  std::string message = "Robot Information:\n";
 
   for (auto& fleet_pair : robot_fleets_) {
     for (auto& robot_pair : fleet_pair.second) {
@@ -200,8 +201,23 @@ void MultiRobotCore::check_disconnected_robots()
           robot.state = Robot::State::DISCONNECTED;
         }
       }
+
+      // Construct a detailed message with all robot information
+      message += "  Robot ID: " + robot_pair.first + "\n";
+      message += "  Fleet: " + fleet_pair.first + "\n";
+      message += "  Current Pose: [x: " + std::to_string(robot.current_pose.utm_x) +
+                  ", y: " + std::to_string(robot.current_pose.utm_y) +
+                  ", theta: " + std::to_string(robot.current_pose.theta) + "]\n";
+      message += "  Last Connected: " + std::to_string(robot.last_connected.sec) +
+                  " seconds, " + std::to_string(robot.last_connected.nanosec) + " nanoseconds\n";
+      message += "  Mission ID: " + robot.mission_id + "\n";
+      message += "  State: " + std::string(
+                                  robot.state == Robot::State::IDLE ? "IDLE" :
+                                  robot.state == Robot::State::ON_MISSION ? "ON_MISSION" : "DISCONNECTED") + "\n";
+      message += "-----------------------------------\n";
     }
   }
+  publish_log(mr_msgs::msg::Log::INFO, message);
 }
 
 void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoalMission::Request> request,
@@ -228,6 +244,15 @@ void MultiRobotCore::assign_single_goal_mission(const std::shared_ptr<SingleGoal
 
   single_goal_mission_request->start_pose = robot.current_pose;
   single_goal_mission_request->goal_pose = request->goal_pose;
+
+  std::string content = "mission_id : " + single_goal_mission_request->mission_data.mission_id +
+                      "\nfleet_id : " + single_goal_mission_request->mission_data.fleet_id +
+                      "\nrobot_id : " + single_goal_mission_request->mission_data.robot_id;
+  content += "\nstart pose: " + std::to_string(single_goal_mission_request->start_pose.utm_x) + "," + std::to_string(single_goal_mission_request->start_pose.utm_y);
+  content += "\ngoal pose: " + std::to_string(single_goal_mission_request->goal_pose.utm_x) + "," + std::to_string(single_goal_mission_request->goal_pose.utm_y);
+
+  RCLCPP_INFO(this->get_logger(), content.c_str());
+
 
   // Send the request to the adapter for global planning and sending to the robot
   if (!single_goal_mission_adapter_client_->wait_for_service(std::chrono::seconds(disconnection_threshold_))) {
