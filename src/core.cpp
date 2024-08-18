@@ -62,13 +62,32 @@ std::vector<UTMPose> convertPosesToWaypoints(const std::vector<geometry_msgs::ms
   return waypoints;
 }
 
+std::string state_to_string(Robot::State state)
+{
+  switch (state)
+  {
+    case Robot::State::IDLE:
+      return "IDLE";
+    case Robot::State::ON_MISSION:
+      return "ON_MISSION";
+    case Robot::State::DISCONNECTED:
+      return "DISCONNECTED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 MultiRobotCore::MultiRobotCore(const rclcpp::NodeOptions & node_options)
 : Node("multi_robot_core_node", node_options)
 {
   this->declare_parameter("qos_depth", 10);
   int8_t qos_depth = this->get_parameter("qos_depth").get_value<int8_t>();
   this->declare_parameter("disconnection_threshold", 10);
+<<<<<<< HEAD
   disconnection_threshold_ = this->get_parameter("disconnection_threshold").get_value<int8_t>();
+=======
+  disconnection_threshold_ = this->get_parameter("disconnection_threshold").get_value<int>();
+>>>>>>> b03f56d (need to update service)
 
   const auto QOS_RKL10V = rclcpp::QoS(rclcpp::KeepLast(qos_depth)).reliable().durability_volatile();
 
@@ -134,31 +153,42 @@ void MultiRobotCore::fleet_robot_pose_callback(const mr_msgs::msg::FleetRobotPos
       robot_fleets_[fleet_id] = std::map<std::string, Robot>();
   }
 
+  std::string content = "fleet name : "+ fleet_id + "\n";
   for (const auto& robot_pose : msg->fleet_pose) {
-      const std::string& robot_id = robot_pose.robot_id;
-      if (robot_fleets_[fleet_id].find(robot_id) == robot_fleets_[fleet_id].end()) {
-          Robot new_robot;
-          new_robot.current_pose = robot_pose;
-          new_robot.last_connected = msg->stamp;
-          new_robot.state = Robot::State::IDLE;
+    const std::string& robot_id = robot_pose.robot_id;
+    if (robot_fleets_[fleet_id].find(robot_id) == robot_fleets_[fleet_id].end()) {
+        Robot new_robot;
+        new_robot.current_pose = robot_pose;
+        new_robot.last_connected = msg->stamp;
+        new_robot.state = Robot::State::IDLE;
 
-          robot_fleets_[fleet_id][robot_id] = new_robot;
-      } else {
-          robot_fleets_[fleet_id][robot_id].current_pose = robot_pose;
-          robot_fleets_[fleet_id][robot_id].last_connected = msg->stamp;
+        robot_fleets_[fleet_id][robot_id] = new_robot;
+    } else {
+        robot_fleets_[fleet_id][robot_id].current_pose = robot_pose;
+        robot_fleets_[fleet_id][robot_id].last_connected = msg->stamp;
 
-          if(robot_fleets_[fleet_id][robot_id].state == Robot::State::DISCONNECTED)
-          {
-            robot_fleets_[fleet_id][robot_id].state = Robot::State::IDLE;
-          } else if(robot_fleets_[fleet_id][robot_id].state == Robot::State::ON_MISSION)
-          {
-            if (missions_.find(robot_fleets_[fleet_id][robot_id].mission_id) != missions_.end()) {
-              Mission& mission = missions_[robot_fleets_[fleet_id][robot_id].mission_id];
-              mission.mission_data.progress = calculate_progress(mission.waypoints, robot_pose.utm_x, robot_pose.utm_y);
-            }
+        if(robot_fleets_[fleet_id][robot_id].state == Robot::State::DISCONNECTED)
+        {
+          robot_fleets_[fleet_id][robot_id].state = Robot::State::IDLE;
+        } else if(robot_fleets_[fleet_id][robot_id].state == Robot::State::ON_MISSION)
+        {
+          if (missions_.find(robot_fleets_[fleet_id][robot_id].mission_id) != missions_.end()) {
+            Mission& mission = missions_[robot_fleets_[fleet_id][robot_id].mission_id];
+            mission.mission_data.progress = calculate_progress(mission.waypoints, robot_pose.utm_x, robot_pose.utm_y);
           }
-      }
+        }
+    }
+    content += "\nRobot name: " + robot_id + "\n";
+    content += "State: " + state_to_string(robot_fleets_[fleet_id][robot_id].state) + "\n";
+    content += "Mission ID: " + robot_fleets_[fleet_id][robot_id].mission_id + "\n";
+    content += "Current Position - x: " + std::to_string(robot_fleets_[fleet_id][robot_id].current_pose.utm_x) +
+              ", y: " + std::to_string(robot_fleets_[fleet_id][robot_id].current_pose.utm_y) +
+              ", theta: " + std::to_string(robot_fleets_[fleet_id][robot_id].current_pose.theta) + "\n";
+    content += "Last Connected: sec: " + std::to_string(robot_fleets_[fleet_id][robot_id].last_connected.sec) +
+              ", nanosec: " + std::to_string(robot_fleets_[fleet_id][robot_id].last_connected.nanosec) + "\n";
   }
+  content += "-------------------------------------\n";
+  publish_log(mr_msgs::msg::Log::INFO, content);
 
   // TODO : check if there is any robots that are going to collide
 }
